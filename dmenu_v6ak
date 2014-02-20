@@ -1,0 +1,103 @@
+#!/bin/bash
+CACHE_FILE=~/.cache/dmenu_v6ak.menu
+LOG_FILE=~/.cache/dmenu_v6ak.log
+PACKAGE_LOG=/var/log/dpkg.log
+BLACKLIST_FILE=~/.config/dmenu_v6ak/blacklist.conf
+HISTORY_FILE=~/.config/dmenu_v6ak/history
+
+if [ -e ~/.config/dmenu_v6ak/exec_before ]; then . ~/.config/dmenu_v6ak/exec_before; fi
+
+function add_to_history {
+	cmd="$1"
+	if [ "$cmd" != "" ] && ( ! grep -qxF -- "$cmd" "$HISTORY_FILE" ); then
+		printf "%s\n" "$cmd" >> "$HISTORY_FILE"
+		rebuild_menu "You have added a new entry to the history"
+	fi
+}
+
+function gen_menu {
+	(
+		tac "$HISTORY_FILE"
+		dmenu_path | grep -vxFf "$HISTORY_FILE" | grep -vxFf "$BLACKLIST_FILE"
+	) | grep -vx ''
+}
+
+function rebuild_menu {
+	reason="$1"
+	notify-send "Rebuilding menu because:" "$reason"
+	tmp_file="$CACHE_FILE.$$.tmp"
+	echo "Rebuilding menu ($rebuild_force_foreground) because:" "$reason" >> "$LOG_FILE"
+	(
+		time ( gen_menu > "$tmp_file" )
+		mv "$tmp_file" "$CACHE_FILE"
+	) &>> "$LOG_FILE"
+}
+
+rebuild=0
+rebuild_force_foreground=0
+rebuild_reasons=""
+note=""
+
+function add_rebuild_reason {
+	if [ "$rebuild_reasons" == "" ]; then
+		rebuild_reasons="$1"
+	else
+		rebuild_reasons="$rebuild_reasons, $1"
+	fi
+}
+
+function rebuild_menu_in_foreground {
+	rebuild=1
+	rebuild_force_foreground=1
+	add_rebuild_reason "$1"
+}
+
+function rebuild_menu_in_background {
+	rebuild=1
+	add_rebuild_reason "$1"
+}
+
+
+if [ ! -e "$CACHE_FILE" ]; then
+	rebuild_menu_in_foreground "menu cache not found"
+fi
+if [ "$CACHE_FILE" -ot "$0" ]; then
+	rebuild_menu_in_foreground "the script is newer than the cache"
+fi
+if [ "$CACHE_FILE" -ot "$PACKAGE_LOG" ]; then
+	rebuild_menu_in_background "package log is newer than the cache"
+fi
+if [ "$CACHE_FILE" -ot "$HISTORY_FILE" ]; then
+	rebuild_menu_in_foreground "history file is newer than the cache"
+fi
+if [ "$CACHE_FILE" -ot "$BLACKLIST_FILE" ]; then
+	rebuild_menu_in_foreground "blacklist file is newer than the cache"
+fi
+
+mkdir -p ~/.config/dmenu_v6ak/
+
+if [ "$rebuild" == "1" ]; then
+	if [ "$rebuild_force_foreground" == 1 ]; then
+		(echo && rebuild_menu "$rebuild_reasons" ) | zenity --progress --text="Rebuilding dmenu-v6ak cache" --no-cancel --pulsate --auto-close
+		note=" (cache rebuilt)"
+	else
+		rebuild_menu "$rebuild_reasons" &
+		note=" (cache is being rebuilt in background)"
+	fi
+fi
+
+(
+	cat "$CACHE_FILE"
+) | (
+	cmd="$(
+		dmenu \
+			-i \
+			-l 30 \
+			-p "Run application$note" \
+ 			-nb \#f2f1f0 -nf black \
+			-sb \#f17746 -sf white \
+			2>> /tmp/dmenu_v6ak.log
+	)"
+	add_to_history "$cmd"&
+	exec $cmd
+)
