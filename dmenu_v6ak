@@ -96,7 +96,6 @@ fi
 			-p "Run application$note" \
  			-nb \#f2f1f0 -nf black \
 			-sb \#f17746 -sf white \
-			2>> /tmp/dmenu_v6ak.log
 	)"
 	add_to_history "$cmd"&
 	exec $cmd
